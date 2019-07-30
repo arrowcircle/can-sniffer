@@ -4,30 +4,37 @@ class LineProcessor
   SEPARATOR = ', '.freeze
 
   SOURCES = {
-    # masters
-    '0x61A' => 'IGPD Master',
-    # '0x642' => 'CCM GIS2 Master',
-    # '0x602' => 'VCB Master',
-    # slaves
+    '0x202' => 'VCB Status',
+    '0x21A' => 'DRCU (Detectors+DMOB)',
+    '0x234' => 'EOCU (I-optics)',
+    '0x237' => 'HVPS (I-optics)',
+    '0x241' => 'CCM GIS1',
+    '0x242' => 'CCM GIS2',
+    '0x243' => 'CCM GIS3',
+    '0x4B7' => 'Unknown',
+    '0x582' => 'VCB/PUC Slave Node',
     '0x59A' => 'IGPD Slave',
-    # '0x5C2' => 'CCM GIS2 Slave',
-    # '0x582' => 'VCB Slave',
-    # statuses
-    '0x21A' => 'IGPD Heartbeat',
-    # '0x242' => 'CCM GIS2 Heartbeat',
-    # '0x202' => 'VCB Heartbeat'
+    '0x5B4' => 'EOCU (I-optics) Slave',
+    '0x5B7' => 'HVPS (I-Optics) Slave',
+    '0x5C1' => 'CCM GIS1 Slave',
+    '0x5C2' => 'CCM GIS2 Slave',
+    '0x5C3' => 'CCM GIS3 Slave',
+    '0x602' => 'VCB/PUC Master',
+    '0x61A' => 'IGPD Master',
+    '0x634' => 'EOCU (I-optics) Master',
+    '0x637' => 'HVPS (I-Optics) Master',
+    '0x641' => 'CCM GIS1 Master',
+    '0x642' => 'CCM GIS2 Master',
+    '0x643' => 'CCM GIS3 Master'
   }
 
   COMMANDS = {
     '2F 0 32 1 1 0 0 0' => 'Start HV1 Command 1',
     '2F 0 32 2 1 0 0 0' => 'Start HV2 Command 1',
     '60 0 32 1 0 0 0 0' => 'Response Start HV1 Command 1 OK',
+    '60 0 32 2 0 0 0 0' => 'Response Start HV2 Command OK',
     '40 0 30 1 0 0 0 0' => 'Start HV1 Command 2',
     '40 0 30 2 0 0 0 0' => 'Start HV2 Command 2',
-    '4F 0 30 1 16 0 0 0' => 'Response Start HV1 Command 2 OK',
-    '4F 0 30 1 17 0 0 0' => 'Response Start HV1 Command 2 OK A1',
-    '4F 0 30 1 1F 0 0 0' => 'Response Start HV1 Command 2 OK A2',
-    '4F 0 30 1 1F 0 0 0' => 'Response Start HV1 Command 2 OK A2',
     '60 0 25 21 0 0 0 0' => 'Unknown command',
     '40 8 10 0 0 0 0 0' => 'Request IGPD status',
     '43 8 10 0 49 47 50 32' => 'Response Status OK',
@@ -64,13 +71,16 @@ class LineProcessor
     '4B 2 64 2' => 'Response linear reading 1',
     '4B 2 64 3' => 'Response HV1 ADC reading',
     '4B 2 64 4' => 'Response HV2 log reading',
-    '4B 2 64 6' => 'Response HV2 linear reading'
+    '4B 2 64 6' => 'Response HV2 linear reading',
+    '4F 0 30 1' => 'Response Start HV1 Command 2 OK',
+    '4F 0 30 2' => 'Response Start HV2 Command 2 OK'
   }
 
-  attr_accessor :data, :comment
+  attr_accessor :data, :comment, :start_time
 
-  def initialize(line)
+  def initialize(line, start_time = nil)
     @data = line.split(SEPARATOR)
+    @start_time = start_time
   end
 
   def id
@@ -78,11 +88,12 @@ class LineProcessor
   end
 
   def ts
-    @data[0]
+    @data[0].strip
   end
 
   def ts_in_sec
-    ts.to_i / 1000.0
+    return ts.to_i / 1000.0 if start_time.nil?
+    ts.to_i / 1000.0 - start_time
   end
 
   def payload
@@ -128,12 +139,19 @@ class LineProcessor
   end
 
   def result
-    [ts_in_sec, id, payload, source, command, comment].join(SEPARATOR)
+    [ts_in_sec.round(3), id, payload, source, command, comment].join(SEPARATOR)
   end
 end
 
+# get first row and get ts
+
+line_in_file = File.open(ARGV[0], encoding: 'bom|utf-8') { |f| f.readline }
+l = LineProcessor.new(line_in_file)
+start_time = l.ts_in_sec
 puts "TS, ID, Data, Source, Command, Unscaled, Scaled"
+puts [0.0, l.id, l.payload, l.source, l.command, l.comment].join(LineProcessor::SEPARATOR)
 File.foreach(ARGV[0]).with_index do |line, line_num|
-  l = LineProcessor.new(line)
-  puts l.result if l.source != 'Unknown'
+  next if line_num == 0
+  l = LineProcessor.new(line, start_time)
+  puts l.result# if l.source != 'Unknown'
 end
